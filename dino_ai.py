@@ -6,149 +6,139 @@ import random
 # ---------------- INIT ----------------
 pygame.init()
 
-WIDTH, HEIGHT = 800, 400
-screen = pygame.display.set_mode((WIDTH, HEIGHT))
-pygame.display.set_caption("CV Dino - Polished Edition")
+GAME_WIDTH, HEIGHT = 900, 450
+CAM_WIDTH = 350
+screen = pygame.display.set_mode((GAME_WIDTH + CAM_WIDTH, HEIGHT))
+pygame.display.set_caption("NeuroRun - Geometric Edition")
 
 clock = pygame.time.Clock()
 
-FONT = pygame.font.SysFont("Arial", 24)
-BIG_FONT = pygame.font.SysFont("Arial", 48)
+FONT = pygame.font.SysFont("consolas", 26)
+BIG = pygame.font.SysFont("consolas", 64)
 
 # ---------------- COLORS ----------------
-WHITE = (255, 255, 255)
-BLACK = (0, 0, 0)
-GRAY = (120, 120, 120)
-GREEN = (0, 200, 0)
-RED = (200, 50, 50)
+BG = (245, 248, 255)
+BLACK = (20, 20, 20)
+RED = (220, 60, 60)
+BLUE = (60, 160, 255)
+GRAY = (180, 180, 180)
 
-GROUND_Y = HEIGHT - 50
+GROUND_Y = HEIGHT - 80
+CEILING_Y = 290
 
 # ---------------- GAME STATES ----------------
-START = 0
-PLAYING = 1
-GAME_OVER = 2
-
+START, PLAYING, GAME_OVER = 0, 1, 2
 state = START
 
 # ---------------- PLAYER ----------------
-dino_x = 80
-dino_y = GROUND_Y - 50
-
-dino_width = 40
-dino_height_stand = 50
-dino_height_duck = 25
-
-velocity_y = 0
+x = 120
+y = GROUND_Y - 25
+vy = 0
 gravity = 0.8
-jump_power = -14
+jump_power = -15
+
+normal_radius = 18
+duck_radius = 10
+radius = normal_radius
 
 is_jumping = False
-is_ducking = False
 jump_lock = False
+is_ducking = False
 
-# ---------------- GAME FEEL ----------------
-base_speed = 6
-speed = base_speed
-speed_increase = 0.002
-
+# ---------------- GAME ----------------
+speed = 7
 score = 0
 high_score = 0
 
-# ---------------- OBSTACLES ----------------
 obstacles = []
-obstacle_timer = 0
+timer = 0
 
 # ---------------- CV ----------------
 mp_hands = mp.solutions.hands
 hands = mp_hands.Hands(max_num_hands=1, min_detection_confidence=0.7)
 mp_draw = mp.solutions.drawing_utils
-
 cap = cv2.VideoCapture(0)
 
-action_buffer = []
+buffer = []
 
-# ---------------- FUNCTIONS ----------------
-def fingers_up(hand_landmarks):
+# ---------------- HAND LOGIC ----------------
+def fingers_up(hand):
     tips = [8, 12, 16, 20]
-    fingers = []
+    f = []
 
-    if hand_landmarks.landmark[4].x < hand_landmarks.landmark[3].x:
-        fingers.append(1)
+    if hand.landmark[4].x < hand.landmark[3].x:
+        f.append(1)
     else:
-        fingers.append(0)
+        f.append(0)
 
-    for tip in tips:
-        if hand_landmarks.landmark[tip].y < hand_landmarks.landmark[tip - 2].y:
-            fingers.append(1)
-        else:
-            fingers.append(0)
+    for t in tips:
+        f.append(1 if hand.landmark[t].y < hand.landmark[t-2].y else 0)
 
-    return fingers
+    return f
 
+# ---------------- PLAYER RECT ----------------
+def player_rect():
+    return pygame.Rect(x - radius, y - radius, radius * 2, radius * 2)
 
-def get_dino_rect():
-    height = dino_height_duck if is_ducking else dino_height_stand
-    y = dino_y + (dino_height_stand - height)
-    return pygame.Rect(dino_x, y, dino_width, height)
-
-
-def reset_game():
-    global obstacles, speed, score
-    global dino_y, velocity_y, is_jumping, is_ducking, jump_lock
-
-    obstacles = []
-    speed = base_speed
-    score = 0
-
-    dino_y = GROUND_Y - dino_height_stand
-    velocity_y = 0
-    is_jumping = False
-    is_ducking = False
-    jump_lock = False
-
-
+# ---------------- OBSTACLES ----------------
 def spawn_obstacle():
-    obs_type = random.choice([1, 2])
+    w = random.randint(20, 35)
+    h = random.randint(35, 60)
 
-    if obs_type == 1:
-        size = random.randint(30, 60)
-        y = GROUND_Y - size
-        color = BLACK
+    return {
+        "x": GAME_WIDTH,
+        "w": w,
+        "h": h,
+        "type": random.choice(["spike_up", "spike_down"])
+    }
+
+def draw_spike(o):
+    x_pos = o["x"]
+    w = o["w"]
+    h = o["h"]
+
+    if o["type"] == "spike_up":
+        # ground spike
+        pygame.draw.polygon(screen, RED, [
+            (x_pos, GROUND_Y),
+            (x_pos + w / 2, GROUND_Y - h),
+            (x_pos + w, GROUND_Y)
+        ])
     else:
-        size = random.randint(20, 40)
-        y = GROUND_Y - size - 20
-        color = RED
-
-    return {"x": WIDTH, "y": y, "size": size, "color": color}
-
+        # ceiling spike (downward)
+        pygame.draw.polygon(screen, RED, [
+            (x_pos, CEILING_Y),
+            (x_pos + w / 2, CEILING_Y + h),
+            (x_pos + w, CEILING_Y)
+        ])
 
 # ---------------- LOOP ----------------
 running = True
 
 while running:
     clock.tick(60)
-    screen.fill(WHITE)
+    screen.fill(BG)
 
-    # ---------------- EVENTS ----------------
+    # -------- EVENTS --------
     for event in pygame.event.get():
         if event.type == pygame.QUIT:
             running = False
 
         if event.type == pygame.KEYDOWN:
+            if state == START and event.key == pygame.K_SPACE:
+                state = PLAYING
 
-            # START SCREEN
-            if state == START:
-                if event.key == pygame.K_SPACE:
-                    state = PLAYING
+            if state == GAME_OVER and event.key == pygame.K_r:
+                state = PLAYING
+                obstacles.clear()
+                score = 0
+                speed = 7
+                y = GROUND_Y - 25
+                vy = 0
+                is_jumping = False
+                jump_lock = False
 
-            # GAME OVER SCREEN
-            elif state == GAME_OVER:
-                if event.key == pygame.K_r:
-                    reset_game()
-                    state = PLAYING
-
-    # ---------------- CV ----------------
+    # -------- CV --------
     ret, frame = cap.read()
     frame = cv2.flip(frame, 1)
 
@@ -156,124 +146,132 @@ while running:
 
     if ret:
         rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-        result = hands.process(rgb)
+        res = hands.process(rgb)
 
-        if result.multi_hand_landmarks:
-            for handLms in result.multi_hand_landmarks:
-                mp_draw.draw_landmarks(frame, handLms, mp_hands.HAND_CONNECTIONS)
+        if res.multi_hand_landmarks:
+            for h in res.multi_hand_landmarks:
+                # mp_draw.draw_landmarks(frame, h, mp_hands.HAND_CONNECTIONS)
 
-                fingers = fingers_up(handLms)
-                total = sum(fingers)
+                f = fingers_up(h)
+                s = sum(f)
 
-                if total == 5:
+                if s == 5:
                     action = "jump"
-                elif total == 0:
+                elif s == 0:
                     action = "duck"
 
-    cv2.imshow("Hand Control", frame)
-    if cv2.waitKey(1) & 0xFF == ord('q'):
-        running = False
+    # cv2.imshow("CV", frame)
+    # if cv2.waitKey(1) & 0xFF == ord('q'):
+    #     break
+    # Resize webcam
+    frame_small = cv2.resize(frame, (CAM_WIDTH, HEIGHT))
 
-    # ---------------- SMOOTHING ----------------
-    action_buffer.append(action)
-    if len(action_buffer) > 7:
-        action_buffer.pop(0)
+# Convert BGR -> RGB
+    frame_small = cv2.cvtColor(frame_small, cv2.COLOR_BGR2RGB)
 
-    jump_votes = action_buffer.count("jump")
-    duck_votes = action_buffer.count("duck")
+# Rotate because pygame and cv2 use different axes
+    frame_small = cv2.transpose(frame_small)
 
-    final_action = None
+# Convert to pygame surface
+    cam_surface = pygame.surfarray.make_surface(frame_small)
 
-    if jump_votes >= 5:
-        final_action = "jump"
-    elif duck_votes >= 5:
-        final_action = "duck"
+# Draw on the right side
+    screen.blit(cam_surface, (GAME_WIDTH, 0))
+    
 
-    # ---------------- GAME LOGIC ----------------
+    buffer.append(action)
+    if len(buffer) > 6:
+        buffer.pop(0)
+
+    final_jump = buffer.count("jump") >= 4
+    final_duck = buffer.count("duck") >= 4
+
+    # -------- GAME --------
     if state == PLAYING:
 
-        # jump
-        if final_action == "jump" and not is_jumping and not jump_lock:
-            velocity_y = jump_power
+        # -------- STATE ----------
+        is_ducking = final_duck and not is_jumping
+        radius = duck_radius if is_ducking else normal_radius
+
+        # -------- JUMP ----------
+        if final_jump and not is_jumping and not jump_lock:
+            vy = jump_power
             is_jumping = True
             jump_lock = True
 
-        # duck
-        is_ducking = (final_action == "duck")
+        # -------- PHYSICS ----------
+        vy += gravity
+        y += vy
 
-        # physics
-        velocity_y += gravity
-        dino_y += velocity_y
-
-        if dino_y >= GROUND_Y - dino_height_stand:
-            dino_y = GROUND_Y - dino_height_stand
-            velocity_y = 0
+        if y >= GROUND_Y - radius:
+            y = GROUND_Y - radius
+            vy = 0
             is_jumping = False
             jump_lock = False
 
-        # speed
-        speed += speed_increase
-
-        # spawn
-        obstacle_timer = obstacle_timer + 1
-        spawn_rate = max(45, 90 - int(speed * 3))
-
-        if obstacle_timer > spawn_rate:
+        # -------- SPAWN ----------
+        timer += 1
+        if timer > max(40, 90 - int(speed * 3)):
             obstacles.append(spawn_obstacle())
-            obstacle_timer = 0
+            timer = 0
 
-        # move
-        for obs in obstacles:
-            obs["x"] -= speed
+        # -------- MOVE ----------
+        for o in obstacles:
+            o["x"] -= speed
 
         obstacles = [o for o in obstacles if o["x"] > -50]
 
-        # collision
-        dino_rect = get_dino_rect()
+        # -------- COLLISION ----------
+        p = player_rect()
 
-        for obs in obstacles:
-            obs_rect = pygame.Rect(obs["x"], obs["y"], obs["size"], obs["size"])
-            if dino_rect.colliderect(obs_rect):
+        for o in obstacles:
+
+            if o["type"] == "spike_up":
+                spike_rect = pygame.Rect(
+                    o["x"],
+                    GROUND_Y - o["h"],
+                    o["w"],
+                    o["h"]
+                )
+            else:
+                spike_rect = pygame.Rect(
+                    o["x"],
+                    CEILING_Y,
+                    o["w"],
+                    o["h"]
+                )
+
+            if p.colliderect(spike_rect):
                 state = GAME_OVER
-                if score > high_score:
-                    high_score = score
+                high_score = max(high_score, score)
 
         score += 1
+        speed += 0.02
 
-    # ---------------- DRAW GAME ----------------
-
-    pygame.draw.line(screen, GRAY, (0, GROUND_Y), (WIDTH, GROUND_Y), 2)
+    # -------- DRAW --------
+    pygame.draw.line(screen, GRAY, (0, GROUND_Y), (GAME_WIDTH, GROUND_Y), 3)
 
     if state == START:
-        title = BIG_FONT.render("CV DINO GAME", True, BLACK)
-        hint = FONT.render("Press SPACE to start (use hand gestures in game)", True, BLACK)
-
-        screen.blit(title, (WIDTH//2 - 180, HEIGHT//2 - 60))
-        screen.blit(hint, (WIDTH//2 - 220, HEIGHT//2))
+        screen.blit(BIG.render("GEOMETRIC RUN", True, BLACK), (220, 150))
+        screen.blit(FONT.render("close FIST to DUCK, show FIVE fingers to JUMP", True, BLACK), (120, 230))
+        screen.blit(FONT.render("Press SPACE to start", True, BLACK), (370, 330))
 
     elif state == PLAYING:
-        dino_rect = get_dino_rect()
-        pygame.draw.rect(screen, GREEN, dino_rect)
 
-        for obs in obstacles:
-            pygame.draw.rect(screen, obs["color"],
-                             (obs["x"], obs["y"], obs["size"], obs["size"]))
+        pygame.draw.circle(screen, BLUE, (x, int(y)), radius)
 
-        score_text = FONT.render(f"Score: {score}", True, BLACK)
-        screen.blit(score_text, (10, 10))
+        for o in obstacles:
+            draw_spike(o)
+
+        screen.blit(FONT.render(f"Score: {score}", True, BLACK), (20, 20))
 
     elif state == GAME_OVER:
-        over = BIG_FONT.render("GAME OVER", True, BLACK)
-        restart = FONT.render("Press R to Restart", True, BLACK)
-        hs = FONT.render(f"High Score: {high_score}", True, BLACK)
-
-        screen.blit(over, (WIDTH//2 - 140, HEIGHT//2 - 80))
-        screen.blit(restart, (WIDTH//2 - 120, HEIGHT//2))
-        screen.blit(hs, (WIDTH//2 - 120, HEIGHT//2 + 40))
+        screen.blit(BIG.render("CRASHED", True, RED), (280, 160))
+        screen.blit(FONT.render("Press R to restart", True, BLACK), (320, 240))
+        screen.blit(FONT.render(f"High Score: {high_score}", True, BLACK), (330, 280))
 
     pygame.display.update()
 
-# ---------------- CLEANUP ----------------
+pygame.quit()
 cap.release()
 cv2.destroyAllWindows()
-pygame.quit()
