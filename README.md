@@ -27,7 +27,7 @@ The game uses AI-based hand landmark detection to translate your movements into 
 
 ## Preview
 
-![alt text](image.png)
+![alt text](<Screenshot 2026-07-02 192321.png>)
 
 ## Features
 
